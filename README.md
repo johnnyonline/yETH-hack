@@ -46,5 +46,5 @@ forge b
 
 Test:
 ```shell
-forge t
+forge t --mt test_attack -vv
 ```

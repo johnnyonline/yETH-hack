@@ -8,9 +8,6 @@ import {IOETH} from "./interfaces/IOETH.sol";
 
 import "forge-std/Test.sol";
 
-// ---- Usage ----
-// `forge t --mt test_attack -vv`
-
 contract HackTests is Test {
 
     bytes localCode;
