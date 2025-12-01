@@ -704,6 +704,54 @@ def vb_prod_sum() -> (uint256, uint256):
 
 @external
 @view
+def debug_calc_supply(_supply: uint256, _vb_prod: uint256, _vb_sum: uint256, _up: bool) -> (uint256, uint256):
+    """
+    @notice Debug helper to run _calc_supply with supplied inputs
+    @dev Used only for testing/analysis; does not mutate state
+    """
+    return self._calc_supply(self.num_assets, _supply, self.amplification, _vb_prod, _vb_sum, _up)
+
+@external
+@view
+def debug_calc_supply_two_iters(_supply: uint256, _vb_prod: uint256, _vb_sum: uint256) -> (uint256, uint256, uint256, uint256):
+    """
+    @notice Debug helper: run the first two iterations of _calc_supply and return r after each
+    @dev Mirrors the arithmetic of _calc_supply (no rounding tweak/early exit) to pinpoint where r drops to zero
+    """
+    num_assets: uint256 = self.num_assets
+    l: uint256 = self.amplification * _vb_sum
+    d: uint256 = unsafe_sub(self.amplification, PRECISION)
+
+    s0: uint256 = _supply
+    r0: uint256 = _vb_prod
+    sp0: uint256 = unsafe_div(unsafe_sub(l, unsafe_mul(s0, r0)), d)
+    for _ in range(MAX_NUM_ASSETS):
+        if _ == num_assets:
+            break
+        r0 = unsafe_div(unsafe_mul(r0, sp0), s0)
+
+    s1: uint256 = sp0
+    r1: uint256 = r0
+    sp1: uint256 = unsafe_div(unsafe_sub(l, unsafe_mul(s1, r1)), d)
+    for _ in range(MAX_NUM_ASSETS):
+        if _ == num_assets:
+            break
+        r1 = unsafe_div(unsafe_mul(r1, sp1), s1)
+
+    return sp0, r0, sp1, r1
+
+@external
+@view
+def debug_vb_prod_step(_prev_vb: uint256, _new_vb: uint256, _packed_weight: uint256, _prod: uint256, _num_assets: uint256) -> uint256:
+    """
+    @notice Debug helper to apply the vb_prod update for a single asset
+    @dev Mirrors the `vb_prod_final` update inside add_liquidity; does not mutate state
+    """
+    wn: uint256 = self._unpack_wn(_packed_weight, _num_assets)
+    return _prod * self._pow_up(_prev_vb * PRECISION / _new_vb, wn) / PRECISION
+
+@external
+@view
 def virtual_balance(_asset: uint256) -> uint256:
     """
     @notice Get the virtual balance of an asset
@@ -1271,8 +1319,9 @@ def _calc_supply(
         assert s > 0
         # --------
         # NOTE: Using safe math on the line below causes `test_attack` to revert.
-        sp: uint256 = unsafe_div(unsafe_sub(l, unsafe_mul(s, r)), d) # D[m+1] = (l - s * r) / d
+        #sp: uint256 = unsafe_div(unsafe_sub(l, unsafe_mul(s, r)), d) # D[m+1] = (l - s * r) / d
         # sp: uint256 = (l - s * r) / d # D[m+1] = (l - s * r) / d
+        sp: uint256 = (l - s * r) / d # D[m+1] = (l - s * r) / d
         # --------
 
         # update product term pi[m+1] = (D[m+1]/D[m])^n pi[m]
