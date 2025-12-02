@@ -41,6 +41,10 @@ packed_pool_vb: uint256 # vb_prod (128) | vb_sum (128)
 # vb_prod: pi, product term `product((w_i * D / x_i)^(w_i n))`
 # vb_sum: sigma, sum term `sum(x_i)`
 
+# Debug helpers (testing/analysis)
+debug_vb_prod_before_calc: public(uint256)
+debug_vb_sum_before_calc: public(uint256)
+
 event Swap:
     account: indexed(address)
     receiver: address
@@ -70,6 +74,23 @@ event RemoveLiquiditySingle:
 event RateUpdate:
     asset: indexed(uint256)
     rate: uint256
+
+# Debug events (testing/analysis)
+event DebugAddLiquidityPre:
+    vb_prod: uint256
+    vb_sum: uint256
+    prev_supply: uint256
+
+event DebugAddLiquidityPost:
+    vb_prod: uint256
+    vb_sum: uint256
+    supply: uint256
+    mint: uint256
+
+event DebugAddLiquidityAsset:
+    asset: indexed(uint256)
+    pow_up: uint256
+    vb_prod_after: uint256
 
 event Pause:
     account: indexed(address)
@@ -471,7 +492,9 @@ def add_liquidity(
             wn: uint256 = self._unpack_wn(packed_weight, num_assets)
 
             # update product and sum of virtual balances
-            vb_prod_final = vb_prod_final * self._pow_up(prev_vb * PRECISION / vb, wn) / PRECISION
+            pow_val: uint256 = self._pow_up(prev_vb * PRECISION / vb, wn)
+            vb_prod_final = vb_prod_final * pow_val / PRECISION
+            log DebugAddLiquidityAsset(asset, pow_val, vb_prod_final)
             # the `D^n` factor will be updated in `_calc_supply()`
             vb_sum_final += dvb
 
@@ -500,6 +523,9 @@ def add_liquidity(
             j = unsafe_add(j, 1)
 
     # mint LP tokens
+    self.debug_vb_prod_before_calc = vb_prod_final
+    self.debug_vb_sum_before_calc = vb_sum_final
+    log DebugAddLiquidityPre(vb_prod_final, vb_sum_final, prev_supply)
     supply, vb_prod = self._calc_supply(num_assets, supply, self.amplification, vb_prod, vb_sum, prev_supply == 0)
     mint: uint256 = supply - prev_supply
     assert mint > 0 and mint >= _min_lp_amount, "slippage"
@@ -517,6 +543,7 @@ def add_liquidity(
 
     self.supply = supply_final
     self.packed_pool_vb = self._pack_pool_vb(vb_prod_final, vb_sum_final)
+    log DebugAddLiquidityPost(vb_prod_final, vb_sum_final, supply_final, mint)
 
     return mint
 
