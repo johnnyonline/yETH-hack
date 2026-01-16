@@ -123,4 +123,14 @@ contract InvariantHackTest is StdInvariant, Test {
             assertGt(vbSum, 0, "vb_sum is zero");
         }
     }
+
+
+    function testRepro() external {
+        vm.prank(0x45fDe635375a9680c34e501b43a82eB6c09C0952);
+        PoolHandler(0x5615dEB798BB3E4dFa0139dFa1b3D433Cc23b72f).removeLiquidity(10791);
+        uint256[8] memory amounts = [uint256(0), 23914085, 11, 1, 767, 365, 23914085, 4584];
+        vm.prank(0xd5F7838F5C461fefF7FE49ea5ebaF7728bB0ADfa);
+        PoolHandler(0x5615dEB798BB3E4dFa0139dFa1b3D433Cc23b72f).addLiquidity(amounts);
+        this.invariant_noFreeValue();
+    }
 }
