@@ -44,7 +44,59 @@ Build:
 forge b
 ```
 
-Test:
+Test (replay attack):
 ```shell
 forge t --mt test_attack -vv
+```
+
+## Invariant Testing
+
+The invariant test in `test/InvariantHack.t.sol` uses generic handlers to fuzz the Pool and detect the exploit without prior knowledge of the attack pattern.
+
+### Handlers
+
+- `addLiquidity` - Deposit assets, receive yETH
+- `removeLiquidity` - Burn yETH, extract assets
+- `updateRates` - Update asset rates with fuzzed indices
+- `triggerRebase` - Trigger OETH rebase
+
+### Invariants
+
+- `invariant_noFreeValue` - Cannot extract more value than deposited
+- `invariant_poolHealth` - vb_prod and vb_sum remain valid when supply > 0
+
+### Run Invariant Test
+
+```shell
+forge t --mt invariant -vv
+```
+
+### Results
+
+The fuzzer discovers the exploit in just **2 calls**, extracting ~2587 ETH with only ~0.00005 ETH deposited:
+
+```
+[PASS] invariant_poolHealth() (runs: 3, calls: 300, reverts: 46)
+
+╭-------------+-----------------+-------+---------+----------╮
+| Contract    | Selector        | Calls | Reverts | Discards |
++============================================================+
+| PoolHandler | addLiquidity    | 75    | 0       | 0        |
+|-------------+-----------------+-------+---------+----------|
+| PoolHandler | removeLiquidity | 62    | 46      | 0        |
+|-------------+-----------------+-------+---------+----------|
+| PoolHandler | triggerRebase   | 82    | 0       | 0        |
+|-------------+-----------------+-------+---------+----------|
+| PoolHandler | updateRates     | 81    | 0       | 0        |
+╰-------------+-----------------+-------+---------+----------╯
+
+Suite result: FAILED. 1 passed; 1 failed; 0 skipped; finished in 41.78s (47.45s CPU time)
+
+Failing tests:
+Encountered 1 failing test in test/InvariantHack.t.sol:InvariantHackTest
+[FAIL: EXPLOIT: Extracted > Deposited: 2587307292531127467438 > 52617287]
+        [Sequence] (original: 28, shrunk: 2)
+                sender=0x45fDe635375a9680c34e501b43a82eB6c09C0952 addr=[test/InvariantHack.t.sol:PoolHandler]0x5615dEB798BB3E4dFa0139dFa1b3D433Cc23b72f calldata=removeLiquidity(uint256) args=[10791 [1.079e4]]
+                sender=0xd5F7838F5C461fefF7FE49ea5ebaF7728bB0ADfa addr=[test/InvariantHack.t.sol:PoolHandler]0x5615dEB798BB3E4dFa0139dFa1b3D433Cc23b72f calldata=addLiquidity(uint256[8]) args=[[0, 23914085 [2.391e7], 11, 1, 767, 365, 23914085 [2.391e7], 4584]]
+ invariant_noFreeValue() (runs: 1, calls: 100, reverts: 34)
 ```
