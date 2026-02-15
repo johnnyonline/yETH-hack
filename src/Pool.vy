@@ -41,6 +41,10 @@ packed_pool_vb: uint256 # vb_prod (128) | vb_sum (128)
 # vb_prod: pi, product term `product((w_i * D / x_i)^(w_i n))`
 # vb_sum: sigma, sum term `sum(x_i)`
 
+# Debug helpers (testing/analysis)
+debug_vb_prod_before_calc: public(uint256)
+debug_vb_sum_before_calc: public(uint256)
+
 event Swap:
     account: indexed(address)
     receiver: address
@@ -70,6 +74,23 @@ event RemoveLiquiditySingle:
 event RateUpdate:
     asset: indexed(uint256)
     rate: uint256
+
+# Debug events (testing/analysis)
+event DebugAddLiquidityPre:
+    vb_prod: uint256
+    vb_sum: uint256
+    prev_supply: uint256
+
+event DebugAddLiquidityPost:
+    vb_prod: uint256
+    vb_sum: uint256
+    supply: uint256
+    mint: uint256
+
+event DebugAddLiquidityAsset:
+    asset: indexed(uint256)
+    pow_up: uint256
+    vb_prod_after: uint256
 
 event Pause:
     account: indexed(address)
@@ -471,7 +492,9 @@ def add_liquidity(
             wn: uint256 = self._unpack_wn(packed_weight, num_assets)
 
             # update product and sum of virtual balances
-            vb_prod_final = vb_prod_final * self._pow_up(prev_vb * PRECISION / vb, wn) / PRECISION
+            pow_val: uint256 = self._pow_up(prev_vb * PRECISION / vb, wn)
+            vb_prod_final = vb_prod_final * pow_val / PRECISION
+            log DebugAddLiquidityAsset(asset, pow_val, vb_prod_final)
             # the `D^n` factor will be updated in `_calc_supply()`
             vb_sum_final += dvb
 
@@ -500,6 +523,9 @@ def add_liquidity(
             j = unsafe_add(j, 1)
 
     # mint LP tokens
+    self.debug_vb_prod_before_calc = vb_prod_final
+    self.debug_vb_sum_before_calc = vb_sum_final
+    log DebugAddLiquidityPre(vb_prod_final, vb_sum_final, prev_supply)
     supply, vb_prod = self._calc_supply(num_assets, supply, self.amplification, vb_prod, vb_sum, prev_supply == 0)
     mint: uint256 = supply - prev_supply
     assert mint > 0 and mint >= _min_lp_amount, "slippage"
@@ -517,6 +543,7 @@ def add_liquidity(
 
     self.supply = supply_final
     self.packed_pool_vb = self._pack_pool_vb(vb_prod_final, vb_sum_final)
+    log DebugAddLiquidityPost(vb_prod_final, vb_sum_final, supply_final, mint)
 
     return mint
 
@@ -701,6 +728,54 @@ def vb_prod_sum() -> (uint256, uint256):
     @return Tuple with product and sum
     """
     return self._unpack_pool_vb(self.packed_pool_vb)
+
+@external
+@view
+def debug_calc_supply(_supply: uint256, _vb_prod: uint256, _vb_sum: uint256, _up: bool) -> (uint256, uint256):
+    """
+    @notice Debug helper to run _calc_supply with supplied inputs
+    @dev Used only for testing/analysis; does not mutate state
+    """
+    return self._calc_supply(self.num_assets, _supply, self.amplification, _vb_prod, _vb_sum, _up)
+
+@external
+@view
+def debug_calc_supply_two_iters(_supply: uint256, _vb_prod: uint256, _vb_sum: uint256) -> (uint256, uint256, uint256, uint256):
+    """
+    @notice Debug helper: run the first two iterations of _calc_supply and return r after each
+    @dev Mirrors the arithmetic of _calc_supply (no rounding tweak/early exit) to pinpoint where r drops to zero
+    """
+    num_assets: uint256 = self.num_assets
+    l: uint256 = self.amplification * _vb_sum
+    d: uint256 = unsafe_sub(self.amplification, PRECISION)
+
+    s0: uint256 = _supply
+    r0: uint256 = _vb_prod
+    sp0: uint256 = unsafe_div(unsafe_sub(l, unsafe_mul(s0, r0)), d)
+    for _ in range(MAX_NUM_ASSETS):
+        if _ == num_assets:
+            break
+        r0 = unsafe_div(unsafe_mul(r0, sp0), s0)
+
+    s1: uint256 = sp0
+    r1: uint256 = r0
+    sp1: uint256 = unsafe_div(unsafe_sub(l, unsafe_mul(s1, r1)), d)
+    for _ in range(MAX_NUM_ASSETS):
+        if _ == num_assets:
+            break
+        r1 = unsafe_div(unsafe_mul(r1, sp1), s1)
+
+    return sp0, r0, sp1, r1
+
+@external
+@view
+def debug_vb_prod_step(_prev_vb: uint256, _new_vb: uint256, _packed_weight: uint256, _prod: uint256, _num_assets: uint256) -> uint256:
+    """
+    @notice Debug helper to apply the vb_prod update for a single asset
+    @dev Mirrors the `vb_prod_final` update inside add_liquidity; does not mutate state
+    """
+    wn: uint256 = self._unpack_wn(_packed_weight, _num_assets)
+    return _prod * self._pow_up(_prev_vb * PRECISION / _new_vb, wn) / PRECISION
 
 @external
 @view
@@ -1271,8 +1346,9 @@ def _calc_supply(
         assert s > 0
         # --------
         # NOTE: Using safe math on the line below causes `test_attack` to revert.
-        sp: uint256 = unsafe_div(unsafe_sub(l, unsafe_mul(s, r)), d) # D[m+1] = (l - s * r) / d
+        #sp: uint256 = unsafe_div(unsafe_sub(l, unsafe_mul(s, r)), d) # D[m+1] = (l - s * r) / d
         # sp: uint256 = (l - s * r) / d # D[m+1] = (l - s * r) / d
+        sp: uint256 = (l - s * r) / d # D[m+1] = (l - s * r) / d
         # --------
 
         # update product term pi[m+1] = (D[m+1]/D[m])^n pi[m]

